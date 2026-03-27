@@ -1,4 +1,7 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import time
 import requests
 import pandas as pd
@@ -8,7 +11,7 @@ from datetime import datetime, timezone
 # 1. CONFIGURATION & DEMO SETTINGS
 # ==========================================
 API_URL = "http://localhost:8000/predict"
-CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "mock_anomaly_telemetry.csv")
+CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock_anomaly_telemetry.csv")
 
 # 🎛️ WHICH ANOMALY DO YOU WANT TO DEMO?
 # 1 = The "Infinite Loop" (Payment API CPU Spike)

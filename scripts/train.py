@@ -1,4 +1,7 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,7 +17,7 @@ from src.model import TelemetryAutoencoder
 
 def train_model():
     # 1. Setup Data Paths
-    data_path = os.path.join(os.path.dirname(__file__), "data", "mock_healthy_telemetry.csv")         
+    data_path = os.path.join(os.path.dirname(__file__), "..", "data", "mock_healthy_telemetry.csv")
     # 2. Hyperparameters (The dials you can tune)
     EPOCHS = 50          # How many times to read the whole CSV
     BATCH_SIZE = 64       # How many rows to look at before updating the math

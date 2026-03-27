@@ -1,4 +1,7 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import pandas as pd
 from src import config
@@ -12,7 +15,7 @@ model.load_state_dict(torch.load(config.MODEL_SAVE_PATH))
 model.eval()
 
 # 2. Load the Anomaly Data
-csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "mock_anomaly_telemetry.csv")
+csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock_anomaly_telemetry.csv")
 df = pd.read_csv(csv_path)
 
 # Grab row 1150 (We know this is right in the middle of the chaos spike)
