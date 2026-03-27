@@ -1,10 +1,13 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import requests
 import pandas as pd
 from datetime import datetime, timezone
 
 API_URL = "http://localhost:8000/predict"
-CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "mock_anomaly_telemetry.csv")
+CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock_anomaly_telemetry.csv")
 
 def fire_test_request(metrics_dict, test_name):
     payload = {

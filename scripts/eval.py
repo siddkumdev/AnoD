@@ -1,4 +1,7 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import numpy as np
 import pandas as pd
@@ -23,7 +26,7 @@ def evaluate():
     model.eval()
     
     # 2. Load Data
-    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "mock_anomaly_telemetry.csv")
+    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "mock_anomaly_telemetry.csv")
     df = pd.read_csv(csv_path)
     
     # 3. Define the Ground Truth (What ACTUALLY happened based on our mock script)
