@@ -1,105 +1,85 @@
-import os
-import sys
-import numpy as np
 import pandas as pd
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+import joblib
+import sys
+import os
+# Get the absolute path of the directory containing this script
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the parent directory (your project root)
+parent_dir = os.path.abspath(os.path.join(current_dir, ".."))
 
-# Pathing fix so it finds the src folder perfectly
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src import config
+# Add the parent directory to Python's system path
+sys.path.append(parent_dir)
+# Import the new 36-feature contract from your config file
+from src.config import EXPECTED_METRICS, MONITORED_SERVICES
 
-# ==========================================
-# 🎛️ THE TUNING DIALS
-# ==========================================
-HEALTHY_ROWS = 10000
-ANOMALY_ROWS = 2000
-
-def get_base_metrics(num_rows):
-    """Generates a perfectly healthy baseline dataframe for all 30 Fusion metrics."""
+def generate_synthetic_telemetry(num_rows=5000):
+    """Generates a mock dataset mapping to the 36 telemetry features."""
+    print(f"Generating {num_rows} rows of mock telemetry for {len(MONITORED_SERVICES)} services...")
+    
     data = {}
     
-    for metric in config.EXPECTED_METRICS:
-        if metric.endswith("_cpu_usage"):
-            col_data = np.random.normal(loc=25.0, scale=5.0, size=num_rows)
-            data[metric] = np.clip(col_data, 1.0, 100.0) 
-            
-        elif metric.endswith("_mem_usage"):
-            col_data = np.random.normal(loc=40.0, scale=2.0, size=num_rows)
-            data[metric] = np.clip(col_data, 1.0, 100.0)
-            
-        elif metric.endswith("_net_rx_kbps"):
-            # Healthy receive traffic (e.g., ~1024 KB/s)
-            col_data = np.random.normal(loc=1024.0, scale=100.0, size=num_rows)
-            data[metric] = np.clip(col_data, 0.0, 10000.0)
-            
-        elif metric.endswith("_net_tx_kbps"):
-            # Healthy transmit traffic (e.g., ~512 KB/s)
-            col_data = np.random.normal(loc=512.0, scale=50.0, size=num_rows)
-            data[metric] = np.clip(col_data, 0.0, 10000.0)
-            
-        elif metric.endswith("_restart_count"):
-            # Healthy pods don't restart
-            data[metric] = np.zeros(num_rows)
-            
-        elif metric.endswith("_is_ready"):
-            # 1.0 means True (Healthy and ready to receive traffic)
-            data[metric] = np.ones(num_rows)
-            
-        else:
-            # Fallback for safety
-            data[metric] = np.zeros(num_rows)
-            
-    return pd.DataFrame(data, columns=config.EXPECTED_METRICS)
+    for service in MONITORED_SERVICES:
+        # Convert 'api-gateway' to 'api_gateway' to match your config variable naming
+        prefix = service.replace("-", "_")
+        
+        # 1. CPU Usage (0% to 80% baseline)
+        data[f"{prefix}_cpu_usage"] = np.random.uniform(5.0, 80.0, num_rows)
+        
+        # 2. Memory Usage (10% to 90% baseline)
+        data[f"{prefix}_mem_usage"] = np.random.uniform(10.0, 90.0, num_rows)
+        
+        # 3. Network RX (Receive) in kbps (Wide range: 100 to 5000 kbps)
+        data[f"{prefix}_net_rx_kbps"] = np.random.uniform(100.0, 5000.0, num_rows)
+        
+        # 4. Network TX (Transmit) in kbps (Wide range: 50 to 3000 kbps)
+        data[f"{prefix}_net_tx_kbps"] = np.random.uniform(50.0, 3000.0, num_rows)
+        
+        # 5. Restart Count (Usually 0, occasionally jumps up)
+        # Using a Poisson distribution so mostly 0s and 1s
+        data[f"{prefix}_restart_count"] = np.random.poisson(0.1, num_rows).astype(float)
+        
+        # 6. Readiness State (1.0 = Ready, 0.0 = Not Ready)
+        # Assuming services are ready 98% of the time
+        data[f"{prefix}_is_ready"] = np.random.choice([1.0, 0.0], p=[0.98, 0.02], size=num_rows)
 
-def generate_healthy_csv(filepath):
-    print(f"Generating {HEALTHY_ROWS} rows of healthy 30-metric baseline data...")
-    df = get_base_metrics(HEALTHY_ROWS)
-    df.to_csv(filepath, index=False)
-    print(f"✅ Saved healthy data to {filepath}")
+    # Convert dictionary to DataFrame and ENSURE column order matches config exactly
+    df = pd.DataFrame(data)
+    df = df[EXPECTED_METRICS] 
+    return df
 
-def generate_anomaly_csv(filepath):
-    print(f"Generating {ANOMALY_ROWS} rows of anomaly test data...")
-    df = get_base_metrics(ANOMALY_ROWS)
+def preprocess_and_save(df, output_csv="training_data_v2.csv", scaler_path="scaler_v2.save"):
+    print("Normalizing data ranges using MinMaxScaler...")
     
-    # --- INJECT CHAOS ---
-    start_idx = ANOMALY_ROWS // 2
-    end_idx = start_idx + 300
+    scaler = MinMaxScaler()
+    scaled_values = scaler.fit_transform(df)
+    scaled_df = pd.DataFrame(scaled_values, columns=EXPECTED_METRICS)
     
-    # SCENARIO A: The "Infinite Loop" on Payment API
-    # High CPU, but Network drops to zero because it's frozen
-    if "payment_api_cpu_usage" in df.columns:
-        print("💉 Injecting Scenario A: Infinite Loop (payment_api)...")
-        df.loc[start_idx:end_idx, "payment_api_cpu_usage"] = 99.5
-        df.loc[start_idx:end_idx, "payment_api_net_rx_kbps"] = 2.0  # Basically dead
-        df.loc[start_idx:end_idx, "payment_api_net_tx_kbps"] = 0.5
-        
-# SCENARIO B: The "Crash Loop" on API Gateway
-    # Happens a little bit after Scenario A
-    crash_start = end_idx + 100
-    crash_end = crash_start + 200
-    if "api_gateway_is_ready" in df.columns and crash_start < ANOMALY_ROWS:
-        print("💥 Injecting Scenario B: Crash Loop (api_gateway)...")
-        
-        # 1. The pod becomes unready
-        df.loc[crash_start:crash_end, "api_gateway_is_ready"] = 0.0
-        
-        # 2. THE FIX: Dead pods do not use hardware. Flatline everything to 0.
-        df.loc[crash_start:crash_end, "api_gateway_cpu_usage"] = 0.0
-        df.loc[crash_start:crash_end, "api_gateway_mem_usage"] = 0.0
-        df.loc[crash_start:crash_end, "api_gateway_net_rx_kbps"] = 0.0
-        df.loc[crash_start:crash_end, "api_gateway_net_tx_kbps"] = 0.0
-        
-        # 3. The restart count starts climbing
-        for i, row_idx in enumerate(range(crash_start, crash_end)):
-            df.loc[row_idx, "api_gateway_restart_count"] = float(i // 50 + 1)
-
-    df.to_csv(filepath, index=False)
-    print(f"✅ Saved anomaly data to {filepath}")
+    data_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 1. Save SCALED data for PyTorch training
+    scaled_csv_path = os.path.join(data_dir, output_csv)
+    scaled_df.to_csv(scaled_csv_path, index=False)
+    
+    # 2. NEW: Save RAW data for the Simulator to stream
+    raw_csv_path = os.path.join(data_dir, "raw_telemetry_stream.csv")
+    df.to_csv(raw_csv_path, index=False)
+    print(f"Saved RAW live stream data to {raw_csv_path}")
+    
+    # 3. Save the scaler
+    scaler_full_path = os.path.join(data_dir, "saved_models", scaler_path)
+    os.makedirs(os.path.dirname(scaler_full_path), exist_ok=True)
+    joblib.dump(scaler, scaler_full_path)
+    
+    return scaled_df
 
 if __name__ == "__main__":
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    healthy_path = os.path.join(current_dir, "mock_healthy_telemetry.csv")
-    anomaly_path = os.path.join(current_dir, "mock_anomaly_telemetry.csv")
+    # 1. Generate the raw mock data
+    raw_df = generate_synthetic_telemetry(num_rows=10000)
     
-    generate_healthy_csv(healthy_path)
-    generate_anomaly_csv(anomaly_path)
-    print("🎉 All 30-Dimensional mock data generation complete!")
+    # 2. Scale the data and save the scaler for your live inference script
+    processed_df = preprocess_and_save(raw_df)
+    
+    print("\nShape of final training tensor:", processed_df.shape)
+    print("Ready for PyTorch/Scikit-Learn training!")

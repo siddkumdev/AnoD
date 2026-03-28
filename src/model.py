@@ -7,26 +7,26 @@ class TelemetryAutoencoder(nn.Module):
         super(TelemetryAutoencoder, self).__init__()
         
         # Dynamically size the input based on the API Contract in config.py.
-        # This ensures the model perfectly matches your dataset length.
         input_dim = len(config.EXPECTED_METRICS)
         
         # --- ENCODER ---
-        # Compresses the incoming metrics into a smaller "latent" pattern.
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, 8),
+            nn.Linear(input_dim, 24),
             nn.ReLU(True),
-            nn.Linear(8, 4),      # The "Bottleneck"
+            nn.Linear(24, 16),
+            nn.ReLU(True),
+            nn.Linear(16, 8),     # A wider Bottleneck
             nn.ReLU(True)
         )
         
         # --- DECODER ---
-        # Attempts to rebuild the original metrics from the compressed pattern.
         self.decoder = nn.Sequential(
-            nn.Linear(4, 8),
+            nn.Linear(8, 16),
             nn.ReLU(True),
-            nn.Linear(8, input_dim),
-            # We use Sigmoid here because the preprocessor scaled our data between 0.0 and 1.0
-            nn.Sigmoid() 
+            nn.Linear(16, 24),
+            nn.ReLU(True),
+            nn.Linear(24, input_dim),
+            nn.Sigmoid() # ONLY keep this if your input data is scaled 0 to 1!
         )
 
     def forward(self, x):
@@ -38,20 +38,41 @@ class TelemetryAutoencoder(nn.Module):
     def predict_anomaly(self, original_tensor):
         """
         Helper method for the live API. 
-        Calculates how badly the model failed to reconstruct the data.
+        Calculates global reconstruction error AND per-service Root Cause Analysis (RCA).
         """
-        # Ensure we don't accidentally train the model during a live prediction
         self.eval() 
         with torch.no_grad():
             reconstructed_tensor = self(original_tensor)
             
-            # Calculate Mean Squared Error (MSE) per row
+            # Calculate the raw errors for every single feature separately
             criterion = nn.MSELoss(reduction='none')
-            errors = criterion(reconstructed_tensor, original_tensor).mean(dim=1)
+            feature_errors = criterion(reconstructed_tensor, original_tensor)
             
-            # Compare the error against your hardcoded threshold in config.py
-            is_anomaly = errors > config.ANOMALY_THRESHOLD
+            # 1. Calculate the GLOBAL Score (Average of all features combined)
+            global_error = feature_errors.mean(dim=1)
+            is_anomaly = global_error > config.ANOMALY_THRESHOLD
             
-            return is_anomaly, errors
+            # 2. Calculate PER-SERVICE Scores (Root Cause Analysis)
+            service_scores = {}
+            
+            # Iterate through our 5 active services
+            for service in config.MONITORED_SERVICES:
+                safe_svc = service.replace("-", "_")
+                
+                # Find exactly which columns belong to this specific service
+                service_indices = [
+                    i for i, metric in enumerate(config.EXPECTED_METRICS) 
+                    if metric.startswith(safe_svc)
+                ]
+                
+                if service_indices:
+                    # Slice the tensor to grab just this service's columns
+                    svc_error_tensor = feature_errors[:, service_indices]
+                    # Calculate the average MSE for just this service
+                    svc_mse = svc_error_tensor.mean().item()
+                    
+                    # Store the score in our dictionary
+                    service_scores[service] = svc_mse
 
-
+            # Return the global data AND the new detailed dictionary
+            return is_anomaly, global_error, service_scores
